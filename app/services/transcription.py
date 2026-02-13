@@ -7,7 +7,7 @@ import numpy as np
 
 model = whisper.load_model("base")
 
-def transcribe_audio(waveform: np.ndarray, sr: int) -> dict: #return scripts and metadata
+def transcribe_audio(waveform: np.ndarray) -> dict: #return scripts and metadata
     result = model.transcribe(
         waveform,
         language="en",

@@ -3,7 +3,7 @@ import soundfile as sf
 import numpy as np
 from io import BytesIO
 
-def load_audio_from_upload(file_bytes: bytes, target_sr: 16000): #human speech 8khz --> nyquist rule = 8 * 2 = 16khz
+def load_audio_from_upload(file_bytes: bytes, target_sr: int = 16000): #human speech 8khz --> nyquist rule = 8 * 2 = 16khz
     audio_buffer = BytesIO(file_bytes)
     waveform, sr = sf.read(audio_buffer)
 
@@ -16,8 +16,11 @@ def load_audio_from_upload(file_bytes: bytes, target_sr: 16000): #human speech 8
             orig_sr=sr,
             target_sr=target_sr
         )
-    
-    waveform = waveform / np.max(np.abs(waveform))
+        sr = target_sr
+
+    max_val = np.max(np.abs(waveform))
+    if max_val > 0:
+        waveform = waveform / max_val
 
     return waveform.astype(np.float32), sr
 
