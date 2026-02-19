@@ -9,7 +9,7 @@ import numpy as np
 #model = whisper.load_model("base")
 model = WhisperModel(
     # "base",
-    "tiny",
+    "small",
     compute_type='int8',
     device="cpu"
 )
@@ -17,7 +17,7 @@ def transcribe_streaming(waveform: np.ndarray) -> dict: #return scripts and meta
     segments, _ = model.transcribe(
         waveform,
         language="en",
-        beam_size=1,
+        beam_size=3,
         vad_filter=True, 
         word_timestamps=True
         # fp16=False
