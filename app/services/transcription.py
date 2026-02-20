@@ -9,17 +9,19 @@ import numpy as np
 #model = whisper.load_model("base")
 model = WhisperModel(
     # "base",
-    "small",
-    compute_type='int8',
+    "medium.en",
+    compute_type="int8",
     device="cpu"
 )
 def transcribe_streaming(waveform: np.ndarray) -> dict: #return scripts and metadata
     segments, _ = model.transcribe(
         waveform,
         language="en",
-        beam_size=3,
-        vad_filter=True, 
-        word_timestamps=True
+        beam_size=5,
+        vad_filter=False, 
+        word_timestamps=True,
+        temperature=0.0,
+        condition_on_previous_text=False,
         # fp16=False
     )
     full_text = ""

@@ -1,4 +1,11 @@
+import re
 from rapidfuzz import fuzz
+
+
+def clean_word(word: str) -> str:
+    # remove punctuation + lowercase
+    return re.sub(r"[^\w\s]", "", word.lower()).strip()
+
 
 def detect_keyword(transcription_result: dict, target_keywords: list) -> list:
     detected = []
@@ -7,61 +14,38 @@ def detect_keyword(transcription_result: dict, target_keywords: list) -> list:
 
     for segment in segments:
         for word_info in segment.get("words", []):
-            spoken_words.append({
-                "word": word_info["word"].strip().lower(),
-                "start": word_info["start"],
-                "end": word_info["end"]
-            })
-
-    combined_words = []
-
-    # 2-word combinations
-    for i in range(len(spoken_words) - 1):
-        phrase = spoken_words[i]["word"] + " " + spoken_words[i + 1]["word"]
-        combined_words.append({
-            "word": phrase,
-            "start": spoken_words[i]["start"],
-            "end": spoken_words[i+1]["end"]
-        })
-
-    # 3-word combinations
-    for i in range(len(spoken_words) - 2):
-        phrase = (
-            spoken_words[i]["word"] + " " +
-            spoken_words[i + 1]["word"] + " " +
-            spoken_words[i + 2]["word"]
-        )
-        combined_words.append({
-            "word": phrase,
-            "start": spoken_words[i]["start"],
-            "end": spoken_words[i+2]["end"]
-        })
-
-    all_spoken_words = spoken_words + combined_words
+            cleaned = clean_word(word_info["word"])
+            if cleaned:
+                spoken_words.append({
+                    "word": cleaned,
+                    "start": word_info["start"],
+                    "end": word_info["end"]
+                })
 
     for target in target_keywords:
-        target_clean = target.lower()
 
-        for spoken in all_spoken_words:
-            spoken_word = spoken["word"]
+        target_clean = clean_word(target)
+        target_len = len(target_clean.split())
 
-            if spoken_word == target_clean:
-                detected.append({
-                    "keyword": target,
-                    "match_word": spoken_word,
-                    "start": spoken["start"],
-                    "end": spoken["end"],
-                    "confidence": 1.0,
-                    "match_type": "exact"
-                })
-                continue
+        for i in range(len(spoken_words) - target_len + 1):
 
-            similarity = fuzz.token_set_ratio(spoken_word, target_clean)
+            phrase_words = spoken_words[i:i + target_len]
+            phrase = " ".join([w["word"] for w in phrase_words])
 
-            if similarity >= 82:
+            similarity = fuzz.token_set_ratio(phrase, target_clean)
+
+            if target_len == 1:
+                similarity = fuzz.ratio(phrase, target_clean)
+                threshold = 85
+            else:
+                similarity = fuzz.token_set_ratio(phrase, target_clean)
+                threshold = 80
+
+            if similarity >= threshold:
 
                 already_exists = any(
-                    d["keyword"] == target and abs(d["start"] - spoken["start"]) < 0.2
+                    d["keyword"] == target
+                    and abs(d["start"] - phrase_words[0]["start"]) < 0.2
                     for d in detected
                 )
 
@@ -70,14 +54,11 @@ def detect_keyword(transcription_result: dict, target_keywords: list) -> list:
 
                 detected.append({
                     "keyword": target,
-                    "match_word": spoken_word,
-                    "start": spoken["start"],
-                    "end": spoken["end"],
-                    "confidence": similarity / 100,
-                    "match_type": "fuzzy"
+                    "match_word": phrase,
+                    "start": phrase_words[0]["start"],
+                    "end": phrase_words[-1]["end"],
+                    "confidence": round(similarity / 100, 3),
+                    "match_type": "exact" if similarity == 100 else "fuzzy"
                 })
 
     return detected
-
-
-

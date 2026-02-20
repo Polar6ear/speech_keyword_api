@@ -7,7 +7,7 @@ def reduce_noise(waveform: np.ndarray, sr: int) -> np.ndarray:
         y=waveform,
         sr=sr,
         y_noise=noise_sample,
-        prop_decrease=1.0  
+        prop_decrease=0.6  
     )
 
     return reduce_waveform.astype(np.float32)

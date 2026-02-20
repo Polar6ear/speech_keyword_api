@@ -9,72 +9,109 @@ import asyncio
 from app.services.transcription import transcribe_streaming
 from app.services.keyword_detector import detect_keyword as detect_keyword_service
 from app.config.keyword_config import FOOD_KEYWORDS
-
+from collections import deque
+from app.services.remove_overlap import remove_overlap
+from app.services.vad import apply_vad
 router = APIRouter(
     prefix='/keyword',
     tags=['Keyword Detection']
 )
+from collections import deque
+import numpy as np
+import asyncio
+from fastapi import WebSocket, WebSocketDisconnect
+
+def is_sentence_complate(text: str) -> bool:
+    return text.endswith(('.', '!', '?'))
+
 @router.websocket("/stream")
 async def stream_audio(websocket: WebSocket):
     await websocket.accept()
 
-    audio_buffer = np.zeros(0, dtype=np.float32)
-
     sr = 16000
-    WINDOW_SIZE = sr * 5      
-    HOP_SIZE = sr * 2        
-    processed_until = 0
+    WINDOW_SIZE = sr * 6     
+    HOP_SIZE = int(sr * 3)         
+
+    audio_buffer = deque(maxlen=sr * 12)   
+    cursor = 0
+    previous_tail = np.array([], dtype=np.float32)
+    
+    last_sent_text = ""
+
+    inference_lock = asyncio.Lock()
 
     try:
         while True:
             audio_chunk = await websocket.receive_bytes()
             waveform = np.frombuffer(audio_chunk, dtype=np.float32)
 
-            # Efficient append
-            audio_buffer = np.append(audio_buffer, waveform)
+            audio_buffer.extend(waveform)
 
-            # Enough data for first window?
-            if len(audio_buffer) >= WINDOW_SIZE:
+            buffer_array = np.array(audio_buffer)
 
-                # Sliding window condition
-                if len(audio_buffer) - processed_until >= HOP_SIZE:
+            while cursor + WINDOW_SIZE <= len(buffer_array):
+                
+                current_window = buffer_array[cursor: cursor + WINDOW_SIZE]
+                cursor += HOP_SIZE
 
-                    start = len(audio_buffer) - WINDOW_SIZE
-                    current_window = audio_buffer[start:]
+                rms = np.sqrt(np.mean(current_window ** 2))
+                if rms >  0:
+                    current_window = current_window / rms * 0.2
 
-                    processed_until = len(audio_buffer)
+                speech_audio = apply_vad(current_window, sr)
 
+                if len(speech_audio) < int(sr * 0.4):
+                    continue
+
+                context_window = np.concatenate([previous_tail, speech_audio])
+                previous_tail = speech_audio[-int(sr * 1.5):]
+
+                async with inference_lock:
                     transcription_result = await asyncio.to_thread(
                         transcribe_streaming,
-                        current_window
+                        context_window
                     )
 
-                    current_text = transcription_result.get("text", "").strip()
+                current_text = transcription_result.get("text", "").strip()
 
-                    if len(current_text) < 3:
-                        continue
+                if len(current_text) < 3:
+                    continue
 
-                    detected_items = detect_keyword_service(
-                        transcription_result,
-                        FOOD_KEYWORDS
-                    )
+                if last_sent_text:
+                    new_text = remove_overlap(last_sent_text, current_text)
+                else:
+                    new_text = current_text
 
-                    await websocket.send_json({
-                        "text": current_text,
-                        "keywords": detected_items
-                    })
+                if len(new_text) < 2:
+                    continue 
+                
+                if not is_sentence_complate(current_text):
+                    continue 
 
-            # Prevent infinite growth (memory safety)
-            if len(audio_buffer) > sr * 12:
-                audio_buffer = audio_buffer[-sr * 6:]
-                processed_until = max(0, processed_until - sr * 6)
+                if len(new_text.split()) >= 3:
+                    last_sent_text += " " + new_text
+                else:
+                    continue
+                
+                detected_items = detect_keyword_service(
+                    transcription_result,
+                    FOOD_KEYWORDS
+                )
+
+                await websocket.send_json({
+                    "text": new_text,
+                    "keywords": detected_items
+                })
+
+            if cursor >= len(buffer_array):
+                cursor = 0
+                audio_buffer.clear()
 
     except WebSocketDisconnect:
         print("Client disconnected normally")
 
     except Exception as e:
         print("Unexpected error:", e)
-
 # @router.post('/detect')
 # async def detect_keyword(file: UploadFile = File(...)):
 #     if not file.content_type or not file.content_type.startswith('audio/'):
