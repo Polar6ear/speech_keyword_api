@@ -10,7 +10,7 @@ import numpy as np
 model = WhisperModel(
     # "base",
     "medium.en",
-    compute_type="int8",
+    compute_type="float32",
     device="cpu"
 )
 def transcribe_streaming(waveform: np.ndarray) -> dict: #return scripts and metadata

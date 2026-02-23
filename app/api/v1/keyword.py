@@ -21,8 +21,8 @@ import numpy as np
 import asyncio
 from fastapi import WebSocket, WebSocketDisconnect
 
-def is_sentence_complate(text: str) -> bool:
-    return text.endswith(('.', '!', '?'))
+# def is_sentence_complate(text: str) -> bool:
+#     return text.endswith(('.', '!', '?'))
 
 @router.websocket("/stream")
 async def stream_audio(websocket: WebSocket):
@@ -64,7 +64,7 @@ async def stream_audio(websocket: WebSocket):
                     continue
 
                 context_window = np.concatenate([previous_tail, speech_audio])
-                previous_tail = speech_audio[-int(sr * 1.5):]
+                previous_tail = current_window[-int(sr * 1.5):]
 
                 async with inference_lock:
                     transcription_result = await asyncio.to_thread(
@@ -85,14 +85,18 @@ async def stream_audio(websocket: WebSocket):
                 if len(new_text) < 2:
                     continue 
                 
-                if not is_sentence_complate(current_text):
-                    continue 
+                # if not is_sentence_complate(current_text):
+                #     continue 
 
-                if len(new_text.split()) >= 3:
+                # if len(new_text.split()) >= 3:
+                #     last_sent_text += " " + new_text
+                # else:
+                #     continue
+                if new_text and new_text not in last_sent_text:
                     last_sent_text += " " + new_text
                 else:
-                    continue
-                
+                    continue 
+                 
                 detected_items = detect_keyword_service(
                     transcription_result,
                     FOOD_KEYWORDS
