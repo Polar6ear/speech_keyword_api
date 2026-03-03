@@ -3,16 +3,9 @@
 #high recall (No keyword should miss)
 
 #import whisper
-from faster_whisper import WhisperModel
+from app.core.models import model
 import numpy as np
 
-#model = whisper.load_model("base")
-model = WhisperModel(
-    # "base",
-    "medium.en",
-    compute_type="float32",
-    device="cpu"
-)
 def transcribe_streaming(waveform: np.ndarray) -> dict: #return scripts and metadata
     segments, _ = model.transcribe(
         waveform,
@@ -22,11 +15,11 @@ def transcribe_streaming(waveform: np.ndarray) -> dict: #return scripts and meta
         vad_filter=False, 
         word_timestamps=True,
         temperature=0.0,
-        condition_on_previous_text=True,
-        repetition_penalty=1.05,
+        condition_on_previous_text=False,
+        repetition_penalty=1.02,
         compression_ratio_threshold=2.4,
-        log_prob_threshold=-1.0,
-        no_speech_threshold=0.6,
+        log_prob_threshold=-1.2,
+        no_speech_threshold=0.4,
         # fp16=False
     )
     full_text = ""
