@@ -14,7 +14,7 @@ def apply_silero_vad(waveform: np.ndarray, sr: int) -> np.ndarray:
         audio_tensor,
         model,
         sampling_rate=sr,
-        threshold=0.5 
+        threshold=0.7 
     )
 
     if not speech_timestamps:

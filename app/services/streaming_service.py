@@ -9,6 +9,7 @@ from app.config.keyword_config import FOOD_KEYWORDS
 from app.services.silero_vad import apply_silero_vad
 from app.services.denoise import reduce_noise
 import time
+import librosa
 import logging
 from app.config.streaming_config import (
     SAMPLE_RATE,
@@ -122,8 +123,22 @@ async def handle_stream(websocket: WebSocket):
                 if max_val > 0:
                     current_window = current_window / (max_val + 1e-6)
                 
+                # music filter
+                y_harmonic, y_percussive = librosa.effects.hpss(current_window)
+                harmonic_ratio = np.sum(np.abs(y_harmonic)) / (np.sum(np.abs(current_window)) + 1e-6)
+
                 denoised = reduce_noise(current_window, sr)
-                speech_audio = apply_silero_vad(current_window, sr)
+
+                speech_audio = apply_silero_vad(denoised, sr)
+                speech_ratio = len(speech_audio) / (len(denoised) + 1e-6)
+
+                if harmonic_ratio > 0.8 and speech_ratio < 0.3:
+                    print("Likely pure music - skipping")
+                    continue
+
+                denoised = reduce_noise(current_window, sr)
+                speech_audio = apply_silero_vad(denoised, sr)
+                
                 if len(speech_audio) < sr * 0.3:
                     print(" Skipping due to VAD")
                     continue
