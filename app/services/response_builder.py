@@ -2,8 +2,8 @@ def build_detection_response(detected_keywords: list):
     summary = {}
 
     for item in detected_keywords:
-        word = item["word"]
-        timestamp = item.get("timestamp")
+        word = item["keyword"]
+        timestamp = (item.get("start"), item.get("end"))
 
         if word not in summary:
             summary[word] = {

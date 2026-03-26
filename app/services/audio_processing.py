@@ -23,5 +23,3 @@ def load_audio_from_upload(file_bytes: bytes, target_sr: int = 16000): #human sp
         waveform = waveform / max_val
 
     return waveform.astype(np.float32), sr
-
-

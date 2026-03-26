@@ -8,8 +8,10 @@ from app.services.keyword_detector import detect_keyword as detect_keyword_servi
 from app.config.keyword_config import FOOD_KEYWORDS
 from app.services.silero_vad import apply_silero_vad
 from app.services.denoise import reduce_noise
+from app.services.entity_extractor import extract_order_entities
+from app.services.remove_overlap import remove_overlap
+
 import time
-import librosa
 import logging
 from app.config.streaming_config import (
     SAMPLE_RATE,
@@ -19,11 +21,10 @@ from app.config.streaming_config import (
     MAX_BUFFER_SEC,
     QUEUE_SIZE
 )
+
 sr = SAMPLE_RATE
 logger = logging.getLogger(__name__)
 
-def is_similar(a, b, threashold=0.85):
-    return SequenceMatcher(None, a, b).ratio() > threashold
 
 async def handle_stream(websocket: WebSocket):
     await websocket.accept()
@@ -32,15 +33,19 @@ async def handle_stream(websocket: WebSocket):
     HOP_SIZE = int(sr * HOP_SEC)
     CONTEXT_SIZE = int(sr * CONTEXT_SEC)
 
-    audio_buffer = deque(maxlen=sr * MAX_BUFFER_SEC)    
+    audio_buffer = deque(maxlen=sr * MAX_BUFFER_SEC)
     cursor = 0
     previous_tail = np.array([], dtype=np.float32)
     last_sent_end_time = 0.0
-
+    last_emitted_text = ""
     inference_queue = asyncio.Queue(maxsize=QUEUE_SIZE)
+
+    # Lock to prevent race condition between 2 workers
+    emit_lock = asyncio.Lock()
 
     async def inference_worker():
         nonlocal last_sent_end_time
+        nonlocal last_emitted_text
 
         while True:
             context_window, window_start_time = await inference_queue.get()
@@ -56,7 +61,7 @@ async def handle_stream(websocket: WebSocket):
                     logger.info(f"Whisper Infer Timer:{end - start:.3f}s")
 
                 segments = transcription_result.get("segments", [])
-                print("Segments returned:", segments)
+                logger.debug(f"Segments returned: {segments}")
 
                 if not segments:
                     continue
@@ -77,9 +82,20 @@ async def handle_stream(websocket: WebSocket):
                         new_text_chunks.append(segment_text)
                         max_segment_end = max(max_segment_end, absolute_end)
 
-                final_text = " ".join(new_text_chunks).strip()
+                raw_text = " ".join(new_text_chunks).strip()
+                if not raw_text:
+                    continue
 
-                if final_text:
+                async with emit_lock:
+                    if raw_text == last_emitted_text:
+                        continue
+                    final_text = remove_overlap(last_emitted_text, raw_text)
+
+                    if not final_text:
+                        continue
+
+                    orders = extract_order_entities(final_text, FOOD_KEYWORDS)
+
                     detected = detect_keyword_service(
                         transcription_result,
                         FOOD_KEYWORDS
@@ -87,85 +103,118 @@ async def handle_stream(websocket: WebSocket):
                     detected = [
                         d for d in detected
                         if d["end"] + window_start_time > last_sent_end_time - 0.2
-                    ]       
+                    ]
+
+                    last_emitted_text = raw_text
                     last_sent_end_time = max_segment_end
 
-                    print(" Sending text:", final_text)
-                    print(" Detected:", detected)
+                    logger.info(f"Sending text: {final_text}")
+                    logger.info(f"Detected keywords: {detected}")
 
                     await websocket.send_json({
                         "text": final_text,
                         "keywords": detected,
+                        "orders": orders,
                         "is_final": False
-                })
+                    })
 
             except Exception as e:
                 logger.error(f"Inference error: {e}")
-    worker_task = asyncio.create_task(inference_worker())
+
+    workers = [
+        asyncio.create_task(inference_worker())
+        for _ in range(2)
+    ]
 
     try:
         while True:
-            audio_chunk = await websocket.receive_bytes()
-            waveform = np.frombuffer(audio_chunk, dtype=np.float32)
-            audio_buffer.extend(waveform)
+            try:
+                audio_chunk = await websocket.receive_bytes()
+                waveform = np.frombuffer(audio_chunk, dtype=np.float32)
 
+                if waveform is None or len(waveform) == 0:
+                    logger.warning("Empty audio chunk received")
+                    continue
+
+                if len(waveform) < 100:
+                    logger.debug("Very small chunk, skipped")
+                    continue
+
+            except WebSocketDisconnect:
+                raise
+
+            except Exception as e:
+                logger.warning(f"Invalid audio chunk: {e}")
+                continue
+
+            audio_buffer.extend(waveform)
             buffer_array = np.array(audio_buffer)
 
             while cursor + WINDOW_SIZE <= len(buffer_array):
 
                 window_start_time = cursor / sr
-
                 current_window = buffer_array[cursor: cursor + WINDOW_SIZE]
                 cursor += HOP_SIZE
 
-                # normalize
+                # Normalize
                 max_val = np.percentile(np.abs(current_window), 95)
                 if max_val > 0:
                     current_window = current_window / (max_val + 1e-6)
-                
-                # music filter
-                y_harmonic, y_percussive = librosa.effects.hpss(current_window)
-                harmonic_ratio = np.sum(np.abs(y_harmonic)) / (np.sum(np.abs(current_window)) + 1e-6)
 
                 denoised = reduce_noise(current_window, sr)
-
                 speech_audio = apply_silero_vad(denoised, sr)
-                speech_ratio = len(speech_audio) / (len(denoised) + 1e-6)
 
-                if harmonic_ratio > 0.8 and speech_ratio < 0.3:
-                    print("Likely pure music - skipping")
+                MIN_SPEECH_SEC = 0.3
+                if len(speech_audio) < sr * MIN_SPEECH_SEC:
+                    logger.debug("Skipping small speech chunk")
                     continue
 
-                denoised = reduce_noise(current_window, sr)
-                speech_audio = apply_silero_vad(denoised, sr)
-                
-                if len(speech_audio) < sr * 0.3:
-                    print(" Skipping due to VAD")
+                speech_ratio = len(speech_audio) / (len(current_window) + 1e-6)
+                if speech_ratio < 0.2:
+                    logger.debug("Low speech ratio - skipping")
                     continue
 
                 logger.debug("VAD passed")
                 context_window = np.concatenate([previous_tail, speech_audio])
+
                 if len(context_window) < sr * 0.5:
                     continue
-                previous_tail = speech_audio[-CONTEXT_SIZE:]
 
-                try:
-                    inference_queue.put_nowait((context_window, window_start_time))
-                except asyncio.QueueFull:
-                    pass
-                    
-            if cursor > sr * 10:
-                audio_buffer = deque(list(audio_buffer)[cursor:], maxlen=sr * 20)
-                cursor = 0
+                if len(speech_audio) > CONTEXT_SIZE:
+                    previous_tail = speech_audio[-CONTEXT_SIZE:]
+                else:
+                    previous_tail = speech_audio
+
+                if inference_queue.full():
+                    try:
+                        inference_queue.get_nowait()
+                        logger.warning("Dropped oldest item from queue")
+                    except asyncio.QueueEmpty:
+                        pass
+
+                inference_queue.put_nowait((context_window, window_start_time))
+
+            # Buffer trim
+            if len(audio_buffer) > sr * MAX_BUFFER_SEC:
+                trim_size = int(sr * 5)
+                old_len = len(audio_buffer)
+                audio_buffer = deque(
+                    list(audio_buffer)[-trim_size:],
+                    maxlen=sr * MAX_BUFFER_SEC
+                )
+                cursor = max(0, cursor - (old_len - trim_size))
 
     except WebSocketDisconnect:
-        print("Client disconnected")
+        logger.info("Client disconnected")
 
     except Exception as e:
         logger.exception("Unexpected error occurred")
+
     finally:
-        worker_task.cancel()
-        try:
-            await worker_task
-        except asyncio.CancelledError:
-            pass
+        for w in workers:
+            w.cancel()
+        for w in workers:
+            try:
+                await w
+            except asyncio.CancelledError:
+                pass

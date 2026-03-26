@@ -9,8 +9,9 @@ async def send_audio():
     async with websockets.connect(
         url,
         ping_interval=30,
-        ping_timeout=120
-        ) as websocket:
+        ping_timeout=120,
+        close_timeout=30
+    ) as websocket:
 
         loop = asyncio.get_running_loop()
         audio_queue = asyncio.Queue(maxsize=10)
@@ -20,34 +21,42 @@ async def send_audio():
                 while True:
                     message = await websocket.recv()
                     print("Server:", message)
-            except websockets.exceptions.ConnectionClosed:
-                print("connection closed")
+            except Exception as e:
+                print("connection closed:", e)
 
-        asyncio.create_task(receive())
-        
         async def sender():
             while True:
                 audio_bytes = await audio_queue.get()
+                # print("Sending:", len(audio_bytes))
                 await websocket.send(audio_bytes)
 
+        asyncio.create_task(receive())
         asyncio.create_task(sender())
 
         def callback(indata, frames, time, status):
-            audio_bytes = indata.astype(np.float32).tobytes()
+            if status:
+                print("Status:", status)
+            if indata is None or len(indata) == 0:
+                return
 
-            def safe_put():
-                if not audio_queue.full():
-                    audio_queue.put_nowait(audio_bytes)
+            audio_bytes = indata.copy().astype(np.float32).tobytes()
 
-            loop.call_soon_threadsafe(safe_put)
-        
+            def put_audio(b=audio_bytes):
+                try:
+                    audio_queue.put_nowait(b)
+                except asyncio.QueueFull:
+                    print("Queue full")
+
+            loop.call_soon_threadsafe(put_audio)
+
         with sd.InputStream(
-            device = 1,
             samplerate=16000,
             channels=1,
             dtype='float32',
+            blocksize=1600,
             callback=callback
         ):
-            print(('streaming started...'))
+            print("streaming started...")
             await asyncio.Future()
+
 asyncio.run(send_audio())

@@ -10,16 +10,16 @@ def transcribe_streaming(waveform: np.ndarray) -> dict: #return scripts and meta
     segments, _ = model.transcribe(
         waveform,
         language="en",
-        beam_size=8,
-        best_of=5,
+        beam_size=2,
+        best_of=2,
         vad_filter=False, 
         word_timestamps=True,
         temperature=0.0,
         condition_on_previous_text=False,
-        repetition_penalty=1.02,
         compression_ratio_threshold=2.4,
         log_prob_threshold=-1.2,
-        no_speech_threshold=0.4,
+        no_speech_threshold=0.35,
+        repetition_penalty=1.05
         # fp16=False
     )
     full_text = ""
