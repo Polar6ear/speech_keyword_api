@@ -2,7 +2,7 @@ from faster_whisper import WhisperModel
 import asyncio
 
 model = WhisperModel(
-    "medium.en",
+    "small",
     compute_type="int8",
     device="cpu"
 )
