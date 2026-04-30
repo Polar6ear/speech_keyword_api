@@ -1,8 +1,11 @@
 import asyncio
 import numpy as np
+import time
+import logging
 from collections import deque
 from fastapi import WebSocket, WebSocketDisconnect
-from app.core.models import inference_semaphore
+
+from app.core.model import inference_semaphore
 from app.services.transcription import transcribe_streaming
 from app.services.keyword_detector import detect_keyword as detect_keyword_service
 from app.config.keyword_config import FOOD_KEYWORDS
@@ -10,9 +13,6 @@ from app.services.silero_vad import apply_silero_vad
 from app.services.denoise import reduce_noise
 from app.services.entity_extractor import extract_order_entities
 from app.services.remove_overlap import remove_overlap
-
-import time
-import logging
 from app.config.streaming_config import (
     SAMPLE_RATE,
     WINDOW_SEC,
@@ -40,7 +40,7 @@ async def handle_stream(websocket: WebSocket):
     last_emitted_text = ""
     inference_queue = asyncio.Queue(maxsize=QUEUE_SIZE)
 
-    # Lock to prevent race condition between 2 workers
+    # Lock to prevent race conditions between parallel inference workers
     emit_lock = asyncio.Lock()
 
     async def inference_worker():
@@ -57,8 +57,8 @@ async def handle_stream(websocket: WebSocket):
                         transcribe_streaming,
                         context_window
                     )
-                    end = time.time()
-                    logger.info(f"Whisper Infer Timer:{end - start:.3f}s")
+                    elapsed = time.time() - start
+                    logger.info(f"Whisper inference time: {elapsed:.3f}s")
 
                 segments = transcription_result.get("segments", [])
                 logger.debug(f"Segments returned: {segments}")
@@ -75,9 +75,8 @@ async def handle_stream(websocket: WebSocket):
                     if absolute_end > last_sent_end_time:
                         segment_text = segment["text"].strip()
 
-                        if new_text_chunks:
-                            if segment_text == new_text_chunks[-1]:
-                                continue
+                        if new_text_chunks and segment_text == new_text_chunks[-1]:
+                            continue
 
                         new_text_chunks.append(segment_text)
                         max_segment_end = max(max_segment_end, absolute_end)
@@ -89,8 +88,8 @@ async def handle_stream(websocket: WebSocket):
                 async with emit_lock:
                     if raw_text == last_emitted_text:
                         continue
-                    final_text = remove_overlap(last_emitted_text, raw_text)
 
+                    final_text = remove_overlap(last_emitted_text, raw_text)
                     if not final_text:
                         continue
 
@@ -100,6 +99,7 @@ async def handle_stream(websocket: WebSocket):
                         transcription_result,
                         FOOD_KEYWORDS
                     )
+                    # Only emit keywords that fall within the current window
                     detected = [
                         d for d in detected
                         if d["end"] + window_start_time > last_sent_end_time - 0.2
@@ -151,12 +151,11 @@ async def handle_stream(websocket: WebSocket):
             buffer_array = np.array(audio_buffer)
 
             while cursor + WINDOW_SIZE <= len(buffer_array):
-
                 window_start_time = cursor / sr
                 current_window = buffer_array[cursor: cursor + WINDOW_SIZE]
                 cursor += HOP_SIZE
 
-                # Normalize
+                # Percentile-based normalization (robust to outlier spikes)
                 max_val = np.percentile(np.abs(current_window), 95)
                 if max_val > 0:
                     current_window = current_window / (max_val + 1e-6)
@@ -166,12 +165,12 @@ async def handle_stream(websocket: WebSocket):
 
                 MIN_SPEECH_SEC = 0.3
                 if len(speech_audio) < sr * MIN_SPEECH_SEC:
-                    logger.debug("Skipping small speech chunk")
+                    logger.debug("Skipping: insufficient speech duration")
                     continue
 
                 speech_ratio = len(speech_audio) / (len(current_window) + 1e-6)
                 if speech_ratio < 0.2:
-                    logger.debug("Low speech ratio - skipping")
+                    logger.debug("Skipping: low speech ratio")
                     continue
 
                 logger.debug("VAD passed")
@@ -180,21 +179,23 @@ async def handle_stream(websocket: WebSocket):
                 if len(context_window) < sr * 0.5:
                     continue
 
-                if len(speech_audio) > CONTEXT_SIZE:
-                    previous_tail = speech_audio[-CONTEXT_SIZE:]
-                else:
-                    previous_tail = speech_audio
+                previous_tail = (
+                    speech_audio[-CONTEXT_SIZE:]
+                    if len(speech_audio) > CONTEXT_SIZE
+                    else speech_audio
+                )
 
+                # Drop oldest queued item if queue is full to maintain low latency
                 if inference_queue.full():
                     try:
                         inference_queue.get_nowait()
-                        logger.warning("Dropped oldest item from queue")
+                        logger.warning("Dropped oldest queue item to maintain latency")
                     except asyncio.QueueEmpty:
                         pass
 
                 inference_queue.put_nowait((context_window, window_start_time))
 
-            # Buffer trim
+            # Trim buffer to prevent unbounded memory growth
             if len(audio_buffer) > sr * MAX_BUFFER_SEC:
                 trim_size = int(sr * 5)
                 old_len = len(audio_buffer)
@@ -208,7 +209,7 @@ async def handle_stream(websocket: WebSocket):
         logger.info("Client disconnected")
 
     except Exception as e:
-        logger.exception("Unexpected error occurred")
+        logger.exception("Unexpected error in stream handler")
 
     finally:
         for w in workers:

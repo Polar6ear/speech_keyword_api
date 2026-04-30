@@ -1,4 +1,12 @@
-def remove_overlap(prev_text, current_text):
+def remove_overlap(prev_text: str, current_text: str) -> str:
+    """
+    Remove overlapping suffix/prefix between two consecutive transcript chunks.
+
+    Sliding windows cause the same spoken text to appear in multiple
+    transcription results. This function finds the longest suffix of
+    prev_text that matches a prefix of current_text (minimum 5 chars),
+    then strips that overlap from current_text before returning.
+    """
     prev_text = prev_text.strip()
     current_text = current_text.strip()
 

@@ -59,4 +59,9 @@ async def send_audio():
             print("streaming started...")
             await asyncio.Future()
 
-asyncio.run(send_audio())
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(send_audio())
+    except KeyboardInterrupt:
+        print("\nStreaming stopped.")

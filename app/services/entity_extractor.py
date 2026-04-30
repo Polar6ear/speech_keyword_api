@@ -6,11 +6,19 @@ WORD_TO_NUM = {
     "some": 2, "few": 2, "couple": 2, "double": 2
 }
 
+
 def extract_order_entities(text: str, keywords: list):
+    """
+    Extract ordered items and their quantities from transcribed text.
+
+    Scans for food keywords and nearby numeric tokens (digits or word-numbers),
+    then associates quantities with the closest keyword within a 2-word window.
+    Items without an explicit quantity default to 1.
+    """
     text_lower = text.lower()
     words = text_lower.split()
 
-    # Multi-word keywords dhundo
+    # Find all keyword positions (supports multi-word keywords)
     items = []
     for keyword in keywords:
         start = 0
@@ -22,7 +30,7 @@ def extract_order_entities(text: str, keywords: list):
             items.append((word_pos, keyword))
             start = idx + 1
 
-    # Numbers dhundo
+    # Find all number positions
     numbers = []
     for i, word in enumerate(words):
         clean = re.sub(r"[^\w\s]", "", word)
@@ -34,6 +42,7 @@ def extract_order_entities(text: str, keywords: list):
     results = []
     used_items = set()
 
+    # Associate each number with its nearest keyword (within 2 words)
     for num_idx, num in numbers:
         closest_item = None
         min_distance = float("inf")
@@ -48,6 +57,7 @@ def extract_order_entities(text: str, keywords: list):
             results.append({"item": closest_item, "quantity": num})
             used_items.add(closest_item)
 
+    # Keywords with no associated number default to quantity 1
     for _, item in items:
         if item not in used_items:
             results.append({"item": item, "quantity": 1})

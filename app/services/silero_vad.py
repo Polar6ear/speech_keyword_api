@@ -4,7 +4,15 @@ from silero_vad import load_silero_vad, get_speech_timestamps
 
 model = load_silero_vad()
 
+
 def apply_silero_vad(waveform: np.ndarray, sr: int) -> np.ndarray:
+    """
+    Filter out non-speech segments using Silero VAD (neural network-based).
+
+    Uses a low threshold (0.25) to maximize recall — we prefer to keep
+    borderline audio rather than miss a keyword.
+    Returns a concatenated array of speech-only audio chunks.
+    """
     if len(waveform) == 0:
         return np.array([], dtype=np.float32)
 
@@ -14,14 +22,11 @@ def apply_silero_vad(waveform: np.ndarray, sr: int) -> np.ndarray:
         audio_tensor,
         model,
         sampling_rate=sr,
-        threshold=0.25 
+        threshold=0.25
     )
 
     if not speech_timestamps:
         return np.array([], dtype=np.float32)
 
-    speech_chunks = []
-    for ts in speech_timestamps:
-        speech_chunks.append(waveform[ts["start"]:ts["end"]])
-
+    speech_chunks = [waveform[ts["start"]:ts["end"]] for ts in speech_timestamps]
     return np.concatenate(speech_chunks).astype(np.float32)

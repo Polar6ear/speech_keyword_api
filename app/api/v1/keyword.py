@@ -9,7 +9,3 @@ router = APIRouter(
 @router.websocket("/stream")
 async def stream_audio(websocket: WebSocket):
     await handle_stream(websocket)
-# def is_sentence_complate(text: str) -> bool:
-#     return text.endswith(('.', '!', '?'))
-
-

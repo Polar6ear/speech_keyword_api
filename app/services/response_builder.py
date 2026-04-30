@@ -1,4 +1,9 @@
-def build_detection_response(detected_keywords: list):
+def build_detection_response(detected_keywords: list) -> dict:
+    """
+    Aggregate a list of detected keyword events into a structured summary response.
+
+    Groups by keyword, counts occurrences, and collects all timestamps.
+    """
     summary = {}
 
     for item in detected_keywords:
@@ -18,7 +23,7 @@ def build_detection_response(detected_keywords: list):
     response = {
         "total_keywords_found": sum(v["count"] for v in summary.values()),
         "unique_words": len(summary),
-        "keywords": summary  
-    } 
+        "keywords": summary
+    }
 
     return response
