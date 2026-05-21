@@ -24,7 +24,8 @@ def load_audio_from_upload(file_bytes: bytes, target_sr: int = 16000):
         waveform = librosa.resample(
             waveform,
             orig_sr=sr,
-            target_sr=target_sr
+            target_sr=target_sr,
+            rs_type='kaiser_best'
         )
         sr = target_sr
 

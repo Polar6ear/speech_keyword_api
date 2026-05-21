@@ -22,7 +22,10 @@ def apply_silero_vad(waveform: np.ndarray, sr: int) -> np.ndarray:
         audio_tensor,
         model,
         sampling_rate=sr,
-        threshold=0.25
+        threshold=0.25,
+        min_speech_duration_ms=150,  # ← ADD: "tea", "one" jaise short words catch hoge
+        min_silence_duration_ms=300, # ← ADD: mid-sentence split nahi hoga
+        speech_pad_ms=100            # ← ADD: word edges clip nahi honge
     )
 
     if not speech_timestamps:

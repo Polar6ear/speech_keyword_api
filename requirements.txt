@@ -12,3 +12,5 @@ noisereduce==3.0.3
 RapidFuzz==3.14.3
 websockets==16.0
 python-multipart==0.0.22
+sounddevice==0.5.5
+jellyfish==1.2.1
