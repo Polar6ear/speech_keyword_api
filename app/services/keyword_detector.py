@@ -1,7 +1,7 @@
 import re
 import logging
 from rapidfuzz import fuzz
-import jellyfish
+from metaphone import doublemetaphone
 
 logger = logging.getLogger(__name__)
 
@@ -54,18 +54,17 @@ def detect_keyword(transcription_result: dict, target_keywords: list) -> list:
                 threshold = 80
 
             phonetic_match = False
-            if 70 <= similarity < threshold:
-                try:
-                    phonetic_match = (
-                        jellyfish.soundex(phrase) == jellyfish.soundex(target_clean)
-                    )
-                except Exception:
-                    phonetic_match = False
+            try:
+                dm_phrase = doublemetaphone(phrase)
+                dm_target = doublemetaphone(target_clean)
+                phonetic_match = bool(set(dm_phrase) & set(dm_target) - {''})
+            except Exception:
+                phonetic_match = False
 
             if 65 <= similarity < threshold:
                 logger.debug(f"Borderline match: {phrase} ~ {target_clean} ({similarity})")
 
-            if similarity >= threshold or (similarity >= 70 and phonetic_match):
+            if similarity >= threshold or (similarity >= 78 and phonetic_match):
                 # Deduplicate: skip if same keyword detected within 1 second
                 already_exists = any(
                     d["keyword"] == target

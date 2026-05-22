@@ -49,7 +49,7 @@ def extract_order_entities(text: str, keywords: list):
 
         for item_idx, item in items:
             distance = abs(item_idx - num_idx)
-            if distance < min_distance and distance <= 2:
+            if distance < min_distance and distance <= 3:
                 min_distance = distance
                 closest_item = item
 

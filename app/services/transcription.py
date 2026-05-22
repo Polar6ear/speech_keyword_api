@@ -20,7 +20,7 @@ def transcribe_streaming(waveform: np.ndarray) -> dict:
     segments, _ = model.transcribe(
         waveform,
         language="en",
-        beam_size=2,
+        beam_size=5,
         best_of=2,
         vad_filter=False,
         word_timestamps=True,
@@ -29,7 +29,9 @@ def transcribe_streaming(waveform: np.ndarray) -> dict:
         compression_ratio_threshold=2.4,
         log_prob_threshold=-1.2,
         no_speech_threshold=0.35,
-        repetition_penalty=1.05
+        repetition_penalty=1.05,
+        initial_prompt="Food ordering system. Items: pizza, burger, sandwich, coffee, tea, cold drink, fries, pasta, biryani. Quantities: one, two, three, four, five, half, large, small, medium.", 
+
     )
 
     full_text = ""
