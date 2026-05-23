@@ -30,8 +30,7 @@ def transcribe_streaming(waveform: np.ndarray) -> dict:
         log_prob_threshold=-1.2,
         no_speech_threshold=0.35,
         repetition_penalty=1.05,
-        initial_prompt="Food ordering system. Items: pizza, burger, sandwich, coffee, tea, cold drink, fries, pasta, biryani. Quantities: one, two, three, four, five, half, large, small, medium.", 
-
+        initial_prompt="Customer is ordering food. Menu items include pizza, burger, coffee, tea, biryani, dosa, idli, fries."
     )
 
     full_text = ""

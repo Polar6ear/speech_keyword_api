@@ -2,8 +2,22 @@ import asyncio
 import websockets
 import sounddevice as sd
 import numpy as np
+import json
 
 url = "ws://127.0.0.1:8000/api/v1/keyword/stream"
+
+
+def print_order_slip(orders: list):
+    print("\n" + "─" * 35)
+    print("         🧾 ORDER RECEIVED")
+    print("─" * 35)
+    for order in orders:
+        item = order["item"].title()
+        qty = order["quantity"]
+        print(f"  {item:<20} × {qty}")
+    print("─" * 35)
+    print("  [Listening for next order...]\n")
+
 
 async def send_audio():
     async with websockets.connect(
@@ -20,14 +34,21 @@ async def send_audio():
             try:
                 while True:
                     message = await websocket.recv()
-                    print("Server:", message)
+                    data = json.loads(message)
+
+                    # Order complete — print slip
+                    if data.get("order_complete"):
+                        print_order_slip(data.get("orders", []))
+                    else:
+                        # Real time text — optional, comment out if too noisy
+                        print(f"  → {data.get('text', '')}")
+
             except Exception as e:
                 print("connection closed:", e)
 
         async def sender():
             while True:
                 audio_bytes = await audio_queue.get()
-                # print("Sending:", len(audio_bytes))
                 await websocket.send(audio_bytes)
 
         asyncio.create_task(receive())
@@ -45,7 +66,7 @@ async def send_audio():
                 try:
                     audio_queue.put_nowait(b)
                 except asyncio.QueueFull:
-                    print("Queue full")
+                    pass
 
             loop.call_soon_threadsafe(put_audio)
 
@@ -56,7 +77,10 @@ async def send_audio():
             blocksize=1600,
             callback=callback
         ):
-            print("streaming started...")
+            print("\n" + "─" * 35)
+            print("   🎤 Food Order System Ready")
+            print("─" * 35)
+            print("  Speak your order...\n")
             await asyncio.Future()
 
 
@@ -64,4 +88,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(send_audio())
     except KeyboardInterrupt:
-        print("\nStreaming stopped.")
+        print("\n  System stopped.")
